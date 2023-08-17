@@ -145,8 +145,6 @@ static agtype_value *execute_array_access_operator_internal(agtype *array,
 static agtype_value *execute_map_access_operator(agtype *map,
                                                  agtype_value* map_value,
                                                  agtype *key);
-static agtype_value *execute_map_access_operator_internal(
-    agtype *map, agtype_value *map_value, char *key, int key_len);
 Datum agtype_object_field_impl(FunctionCallInfo fcinfo, bool as_text);
 Datum agtype_array_element_impl(FunctionCallInfo fcinfo, bool as_text);
 /* typecast functions */
@@ -3105,7 +3103,7 @@ static agtype_value *execute_map_access_operator(agtype *map,
                                                 key_len);
 }
 
-static agtype_value *execute_map_access_operator_internal(
+agtype_value *execute_map_access_operator_internal(
     agtype *map, agtype_value *map_value, char *key, int key_len)
 {
     agtype_value new_key_value;

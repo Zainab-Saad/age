@@ -35,6 +35,8 @@ typedef int64 eid;
 #define EID_MIN 1
 #define EID_MAX 9223372036854775807
 
+#define id_is_valid(id) (id >= EID_MIN && id <= EID_MAX)
+
 /*
  * Sequences used for generating vertex and edge ID.
  */
@@ -77,5 +79,6 @@ Oid get_GRAPHIDOID(void);
 Oid get_EIDOID(void);
 Oid get_GRAPHIDARRAYOID(void);
 void clear_global_Oids_GRAPHID(void);
+int64 get_new_id(char entity_type, Oid graphoid);
 
 #endif

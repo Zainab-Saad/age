@@ -66,7 +66,8 @@
 
 
 
-typedef struct {
+typedef struct
+{
     size_t row;
     char **header;
     size_t *header_len;
@@ -87,12 +88,32 @@ typedef struct {
 
 } csv_edge_reader;
 
+typedef struct vertex_table vertex_table;
+
+typedef struct vertex_tables_list
+{
+    vertex_table* head;
+    vertex_table* tail;
+} vertex_tables_list;
+
+typedef struct vertex_entry
+{
+    int64 property_id;
+    int64 vertex_id;
+} vertex_entry;
 
 void edge_field_cb(void *field, size_t field_len, void *data);
 void edge_row_cb(int delim __attribute__((unused)), void *data);
 
-int create_edges_from_csv_file(char *file_path, char *graph_name, Oid graph_oid,
+int create_edges_from_csv_file(char *file_path, char *graph_name,
+                                Oid graph_oid,
                                 char *object_name, int object_id );
+bool is_vertex_table_loaded(int32 label_id, vertex_tables_list* list);
+void load_vertex_table(char* label_name, int32 label_id, Oid graph_oid,
+                        char* graph_name, vertex_tables_list** list);
+void append_label_to_list(vertex_table* vertex_tbl,
+                            vertex_tables_list** list );
+vertex_table* get_hashtable_node(int32 label_id, vertex_tables_list* list);
 
 #endif //AG_LOAD_EDGES_H
 

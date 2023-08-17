@@ -59,8 +59,9 @@ SELECT load_labels_from_file('agload_test_graph', 'City2',
 SELECT COUNT(*) FROM agload_test_graph."Country2";
 SELECT COUNT(*) FROM agload_test_graph."City2";
 
-SELECT id FROM agload_test_graph."Country" LIMIT 10;
-SELECT id FROM agload_test_graph."Country2" LIMIT 10;
+SELECT id, label_id FROM agload_test_graph."Country" LIMIT 10;
+SELECT id, label_id FROM agload_test_graph."Country2" LIMIT 10;
+SELECT * FROM agload_test_graph."has_city" LIMIT 10;
 
 SELECT * FROM cypher('agload_test_graph', $$MATCH(n:Country {iso2 : 'BE'})
     RETURN id(n), n.name, n.iso2 $$) as ("id(n)" agtype, "n.name" agtype, "n.iso2" agtype);

@@ -22,7 +22,10 @@
 #include "fmgr.h"
 #include "utils/builtins.h"
 #include "utils/sortsupport.h"
+#include "commands/sequence.h"
+#include "utils/lsyscache.h"
 
+#include "catalog/ag_label.h"
 #include "utils/graphid.h"
 
 static int graphid_btree_fast_cmp(Datum x, Datum y, SortSupport ssup);
@@ -276,4 +279,28 @@ Datum graphid_hash_cmp(PG_FUNCTION_ARGS)
     int hash = (int) ((l >> 32) ^ l);// ^ seed;
 
     PG_RETURN_INT32(hash);
+}
+
+int64 get_new_id(char entity_type, Oid graphoid)
+{
+    Oid seq_id;
+
+    // get the OID of sequence
+    if (entity_type == LABEL_KIND_VERTEX)
+    {
+        seq_id = get_relname_relid(VERTEX_ID_SEQ, graphoid);
+    }
+    else if (entity_type == LABEL_KIND_EDGE)
+    {
+        seq_id = get_relname_relid(EDGE_ID_SEQ, graphoid);
+    }
+    else
+    {
+        ereport(ERROR, errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg(
+            "Invalid entity type value provided; expected a vertex or edge"));
+    }
+
+    // return the next available id in the sequence
+    return (int64) nextval_internal(seq_id, true);
 }

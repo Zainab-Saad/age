@@ -149,13 +149,13 @@ agtype* create_agtype_from_list_i(char **header, char **fields,
     return out;
 }
 
-void insert_edge_simple(Oid graph_oid, char *label_name, graphid edge_id,
-                        graphid start_id, graphid end_id,
-                        agtype *edge_properties)
+void insert_edge_simple(Oid graph_oid, char *label_name, int64 edge_id,
+                        int64 start_id, int64 end_id,
+                        agtype *edge_properties, int32 label_id)
 {
 
-    Datum values[6];
-    bool nulls[4] = {false, false, false, false};
+    Datum values[5];
+    bool nulls[5] = {false, false, false, false, false};
     Relation label_relation;
     HeapTuple tuple;
 
@@ -163,13 +163,15 @@ void insert_edge_simple(Oid graph_oid, char *label_name, graphid edge_id,
     if (get_label_kind(label_name, graph_oid) == LABEL_KIND_VERTEX)
     {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("label %s already exists as vertex label", label_name)));
+                        errmsg("label %s already exists as vertex label",
+                                label_name)));
     }
 
-    values[0] = GRAPHID_GET_DATUM(edge_id);
-    values[1] = GRAPHID_GET_DATUM(start_id);
-    values[2] = GRAPHID_GET_DATUM(end_id);
+    values[0] = Int64GetDatum(edge_id);
+    values[1] = Int64GetDatum(start_id);
+    values[2] = Int64GetDatum(end_id);
     values[3] = AGTYPE_P_GET_DATUM((edge_properties));
+    values[4] = Int32GetDatum(label_id);
 
     label_relation = table_open(get_label_relation(label_name, graph_oid),
                                 RowExclusiveLock);
@@ -182,12 +184,12 @@ void insert_edge_simple(Oid graph_oid, char *label_name, graphid edge_id,
     CommandCounterIncrement();
 }
 
-void insert_vertex_simple(Oid graph_oid, char *label_name, graphid vertex_id,
-                          agtype *vertex_properties)
+void insert_vertex_simple(Oid graph_oid, char *label_name, int64 vertex_id,
+                          agtype *vertex_properties, int32 label_id)
 {
 
-    Datum values[2];
-    bool nulls[2] = {false, false};
+    Datum values[3];
+    bool nulls[3] = {false, false, false};
     Relation label_relation;
     HeapTuple tuple;
 
@@ -195,11 +197,13 @@ void insert_vertex_simple(Oid graph_oid, char *label_name, graphid vertex_id,
     if (get_label_kind(label_name, graph_oid) == LABEL_KIND_EDGE)
     {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("label %s already exists as edge label", label_name)));
+                        errmsg("label %s already exists as edge label",
+                                label_name)));
     }
 
-    values[0] = GRAPHID_GET_DATUM(vertex_id);
+    values[0] = Int64GetDatum(vertex_id);
     values[1] = AGTYPE_P_GET_DATUM((vertex_properties));
+    values[2] = Int32GetDatum(label_id);
 
     label_relation = table_open(get_label_relation(label_name, graph_oid),
                                 RowExclusiveLock);
