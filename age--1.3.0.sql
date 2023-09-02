@@ -373,7 +373,7 @@ STABLE
 PARALLEL SAFE
 AS 'MODULE_PATHNAME', '_label_name_from_label_id';
 
-CREATE FUNCTION ag_catalog._extract_label_id(graphid)
+CREATE FUNCTION ag_catalog._extract_label_id(bigint)
 RETURNS label_id
 LANGUAGE c
 STABLE
