@@ -62,6 +62,7 @@ const ScanKeyword cypher_keywords[] = {
     {"exists", EXISTS, RESERVED_KEYWORD},
     {"explain", EXPLAIN, RESERVED_KEYWORD},
     {"false", FALSE_P, RESERVED_KEYWORD},
+    {"for", FOR, RESERVED_KEYWORD},
     {"in", IN, RESERVED_KEYWORD},
     {"is", IS, RESERVED_KEYWORD},
     {"limit", LIMIT, RESERVED_KEYWORD},

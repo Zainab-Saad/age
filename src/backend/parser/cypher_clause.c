@@ -95,9 +95,6 @@
 #define INCLUDE_NODE_IN_JOIN_TREE(path, node) \
     (path->var_name || node->name || node->props)
 
-typedef Query *(*transform_method)(cypher_parsestate *cpstate,
-                                   cypher_clause *clause);
-
 // projection
 static Query *transform_cypher_return(cypher_parsestate *cpstate,
                                       cypher_clause *clause);
@@ -280,11 +277,6 @@ static Query *transform_cypher_call_subquery(cypher_parsestate *cpstate,
 #define transform_prev_cypher_clause(cpstate, prev_clause, add_rte_to_query) \
     transform_cypher_clause_as_subquery(cpstate, transform_cypher_clause, \
                                         prev_clause, NULL, add_rte_to_query)
-static RangeTblEntry *transform_cypher_clause_as_subquery(cypher_parsestate *cpstate,
-                                                          transform_method transform,
-                                                          cypher_clause *clause,
-                                                          Alias *alias,
-                                                          bool add_rte_to_query);
 static Query *analyze_cypher_clause(transform_method transform,
                                     cypher_clause *clause,
                                     cypher_parsestate *parent_cpstate);
@@ -382,7 +374,9 @@ Query *transform_cypher_clause(cypher_parsestate *cpstate,
     }
     else if (is_ag_node(self, cypher_unwind))
     {
-        result = transform_cypher_unwind(cpstate, clause);
+        result = transform_cypher_clause_with_where(cpstate,
+                                                    transform_cypher_unwind,
+                                                    clause, NULL);
     }
     else if (is_ag_node(self, cypher_call))
     {
@@ -1300,6 +1294,7 @@ static Query *transform_cypher_unwind(cypher_parsestate *cpstate,
     ParseExprKind old_expr_kind;
     Node *funcexpr;
     TargetEntry *te;
+    List *args = NIL;
 
     query = makeNode(Query);
     query->commandType = CMD_SELECT;
@@ -1321,19 +1316,33 @@ static Query *transform_cypher_unwind(cypher_parsestate *cpstate,
     {
         ereport(ERROR,
                 (errcode(ERRCODE_DUPLICATE_ALIAS),
-                        errmsg("duplicate variable \"%s\"", self->target->name),
-                        parser_errposition((ParseState *) cpstate, target_syntax_loc)));
+                 errmsg("duplicate variable \"%s\"", self->target->name),
+                 parser_errposition((ParseState *) cpstate, target_syntax_loc)));
     }
 
-    expr = transform_cypher_expr(cpstate, self->target->val, EXPR_KIND_SELECT_TARGET);
+    expr = transform_cypher_expr(cpstate, self->target->val,
+                                 EXPR_KIND_SELECT_TARGET);
 
     unwind = makeFuncCall(list_make1(makeString("age_unnest")), NIL, -1);
 
 
     old_expr_kind = pstate->p_expr_kind;
     pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
-    funcexpr = ParseFuncOrColumn(pstate, unwind->funcname,
-                                 list_make1(expr),
+    /*
+     * We need to build the args list for unnest differently for a
+     * list_comprehension node. If collect is set, this is list_comp
+     */
+    if (self->collect != NULL)
+    {
+        args = list_make2(expr, makeBoolConst(true, false));
+    }
+    else
+    {
+        args = list_make2(expr, makeBoolConst(false, false));
+    }
+
+    /* transform the function call node */
+    funcexpr = ParseFuncOrColumn(pstate, unwind->funcname, args,
                                  pstate->p_last_srf, unwind, false,
                                  target_syntax_loc);
 
@@ -2033,7 +2042,7 @@ static Query *transform_cypher_return(cypher_parsestate *cpstate,
 {
     ParseState *pstate = (ParseState *)cpstate;
     cypher_return *self = (cypher_return *)clause->self;
-    Query *query;
+    Query *query = NULL;
     List *groupClause = NIL;
 
     query = makeNode(Query);
@@ -2269,19 +2278,29 @@ static Query *transform_cypher_clause_with_where(cypher_parsestate *cpstate,
                                                  cypher_clause *clause, Node *where)
 {
     ParseState *pstate = (ParseState *)cpstate;
-    Query *query;
+    Query *query = NULL;
     Node *self = clause->self;
     Node *where_qual = NULL;
+    bool is_unwind = false;
+
+    /* set up for unwind with where */
+    if (where == NULL && is_ag_node(self, cypher_unwind))
+    {
+        where = ((cypher_unwind *)self)->where;
+        is_unwind = true;
+    }
 
     if (where)
     {
-        RangeTblEntry *rte;
-        int rtindex;
+        RangeTblEntry *rte = NULL;
+        Node *where_expr = NULL;
+        int rtindex = 0;
 
         query = makeNode(Query);
         query->commandType = CMD_SELECT;
 
-        rte = transform_cypher_clause_as_subquery(cpstate, transform, clause, NULL, true);
+        rte = transform_cypher_clause_as_subquery(cpstate, transform, clause,
+                                                  NULL, true);
 
         rtindex = list_length(pstate->p_rtable);
         Assert(rtindex == 1); // rte is the only RangeTblEntry in pstate
@@ -2295,18 +2314,29 @@ static Query *transform_cypher_clause_with_where(cypher_parsestate *cpstate,
 
         markTargetListOrigins(pstate, query->targetList);
 
-        query->rtable = pstate->p_rtable;
+        /* if this is unwind */
+        if (is_unwind)
+        {
+            /* transform the unwind where clause */
+            where_expr = transform_cypher_expr(cpstate, where,
+                                               EXPR_KIND_WHERE);
+
+            /* Coerce to WHERE clause to a boolean */
+            where_expr = coerce_to_boolean(pstate, where_expr, "WHERE");
+
+            query->jointree = makeFromExpr(pstate->p_joinlist, where_expr);
+        }
 
         if (!is_ag_node(self, cypher_match))
         {
             where_qual = transform_cypher_expr(cpstate, where,
-                                                        EXPR_KIND_WHERE);
+                                               EXPR_KIND_WHERE);
 
-            where_qual = coerce_to_boolean(pstate, where_qual,
-                                            "WHERE");
+            where_qual = coerce_to_boolean(pstate, where_qual, "WHERE");
         }
-        
+
         query->jointree = makeFromExpr(pstate->p_joinlist, where_qual);
+        query->rtable = pstate->p_rtable;
         assign_query_collations(pstate, query);
     }
     else
@@ -2342,9 +2372,9 @@ static Query *transform_cypher_match(cypher_parsestate *cpstate,
                                                      (Node *)r, -1);
     }
 
-    return transform_cypher_clause_with_where(
-        cpstate, transform_cypher_match_pattern, clause, 
-        match_self->where);
+    return transform_cypher_clause_with_where(cpstate,
+                                              transform_cypher_match_pattern,
+                                              clause, match_self->where);
 }
 
 /*
@@ -5593,7 +5623,7 @@ static Expr *cypher_create_properties(cypher_parsestate *cpstate,
  * This function is similar to transformFromClause() that is called with a
  * single RangeSubselect.
  */
-static RangeTblEntry *
+RangeTblEntry *
 transform_cypher_clause_as_subquery(cypher_parsestate *cpstate,
                                     transform_method transform,
                                     cypher_clause *clause,

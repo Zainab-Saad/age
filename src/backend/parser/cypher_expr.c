@@ -95,6 +95,8 @@ static Node *transform_FuncCall(cypher_parsestate *cpstate, FuncCall *fn);
 static Node *transform_WholeRowRef(ParseState *pstate, RangeTblEntry *rte,
                                    int location);
 static ArrayExpr *make_agtype_array_expr(List *args);
+static Node *transform_cypher_list_comprehension(cypher_parsestate *cpstate,
+                                                 cypher_unwind *expr);
 
 /* transform a cypher expression */
 Node *transform_cypher_expr(cypher_parsestate *cpstate, Node *expr,
@@ -120,7 +122,9 @@ static Node *transform_cypher_expr_recurse(cypher_parsestate *cpstate,
                                            Node *expr)
 {
     if (!expr)
+    {
         return NULL;
+    }
 
     // guard against stack overflow due to overly complex expressions
     check_stack_depth();
@@ -171,27 +175,47 @@ static Node *transform_cypher_expr_recurse(cypher_parsestate *cpstate,
         return transform_CoalesceExpr(cpstate, (CoalesceExpr *) expr);
     case T_ExtensibleNode:
         if (is_ag_node(expr, cypher_bool_const))
+        {
             return transform_cypher_bool_const(cpstate,
                                                (cypher_bool_const *)expr);
+        }
         if (is_ag_node(expr, cypher_integer_const))
+        {
             return transform_cypher_integer_const(cpstate,
                                                   (cypher_integer_const *)expr);
+        }
         if (is_ag_node(expr, cypher_param))
+        {
             return transform_cypher_param(cpstate, (cypher_param *)expr);
+        }
         if (is_ag_node(expr, cypher_map))
+        {
             return transform_cypher_map(cpstate, (cypher_map *)expr);
+        }
         if (is_ag_node(expr, cypher_list))
+        {
             return transform_cypher_list(cpstate, (cypher_list *)expr);
+        }
         if (is_ag_node(expr, cypher_string_match))
+        {
             return transform_cypher_string_match(cpstate,
                                                  (cypher_string_match *)expr);
+        }
         if (is_ag_node(expr, cypher_typecast))
+        {
             return transform_cypher_typecast(cpstate,
                                              (cypher_typecast *)expr);
+        }
+        if (is_ag_node(expr, cypher_unwind))
+        {
+            return transform_cypher_list_comprehension(cpstate,
+                                                       (cypher_unwind *) expr);
+        }
         ereport(ERROR,
                 (errmsg_internal("unrecognized ExtensibleNode: %s",
                                  ((ExtensibleNode *)expr)->extnodename)));
         return NULL;
+
     case T_FuncCall:
         return transform_FuncCall(cpstate, (FuncCall *)expr);
     case T_SubLink:
@@ -1357,6 +1381,9 @@ static Node *transform_SubLink(cypher_parsestate *cpstate, SubLink *sublink)
             /* Accept sublink here; caller must throw error if wanted */
 
             break;
+        case EXPR_KIND_JOIN_ON:
+        case EXPR_KIND_JOIN_USING:
+        case EXPR_KIND_FROM_FUNCTION:
         case EXPR_KIND_SELECT_TARGET:
         case EXPR_KIND_FROM_SUBSELECT:
         case EXPR_KIND_WHERE:
@@ -1368,12 +1395,15 @@ static Node *transform_SubLink(cypher_parsestate *cpstate, SubLink *sublink)
                             parser_errposition(pstate, sublink->location)));
     }
     if (err)
+    {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg_internal("%s", err),
                  parser_errposition(pstate, sublink->location)));
+    }
 
     pstate->p_hasSubLinks = true;
+
     /*
      * OK, let's transform the sub-SELECT.
      */
@@ -1385,7 +1415,9 @@ static Node *transform_SubLink(cypher_parsestate *cpstate, SubLink *sublink)
      * restrictions of the grammar, but check anyway.
      */
     if (!IsA(qtree, Query) || qtree->commandType != CMD_SELECT)
+    {
         elog(ERROR, "unexpected non-SELECT command in SubLink");
+    }
 
     sublink->subselect = (Node *)qtree;
 
@@ -1398,8 +1430,55 @@ static Node *transform_SubLink(cypher_parsestate *cpstate, SubLink *sublink)
         sublink->testexpr = NULL;
         sublink->operName = NIL;
     }
+    else if (sublink->subLinkType == EXPR_SUBLINK ||
+             sublink->subLinkType == ARRAY_SUBLINK)
+    {
+        /*
+         * Make sure the subselect delivers a single column (ignoring resjunk
+         * targets).
+         */
+        if (count_nonjunk_tlist_entries(qtree->targetList) != 1)
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                     errmsg("subquery must return only one column"),
+                     parser_errposition(pstate, sublink->location)));
+        }
+
+        /*
+         * EXPR and ARRAY need no test expression or combining operator. These
+         * fields should be null already, but make sure.
+         */
+        sublink->testexpr = NULL;
+        sublink->operName = NIL;
+    }
+    else if (sublink->subLinkType == MULTIEXPR_SUBLINK)
+    {
+        /* Same as EXPR case, except no restriction on number of columns */
+        sublink->testexpr = NULL;
+        sublink->operName = NIL;
+    }
     else
+    {
+        /* ALL, ANY, or ROWCOMPARE: generate row-comparing expression */
         elog(ERROR, "unsupported SubLink type");
+    }
 
     return result;
+}
+
+static Node *transform_cypher_list_comprehension(cypher_parsestate *cpstate,
+                                                 cypher_unwind *unwind)
+{
+    cypher_clause cc;
+
+    cc.prev = NULL;
+    cc.next = NULL;
+    cc.self = (Node *)unwind;
+
+    transform_cypher_clause_as_subquery(cpstate, transform_cypher_clause, &cc,
+                                        NULL, true);
+
+    return transform_cypher_expr(cpstate, unwind->collect,
+                                 EXPR_KIND_SELECT_TARGET);
 }

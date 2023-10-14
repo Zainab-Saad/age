@@ -84,7 +84,7 @@
                  CALL CASE COALESCE CONTAINS CREATE
                  DELETE DESC DESCENDING DETACH DISTINCT
                  ELSE END_P ENDS EXISTS EXPLAIN
-                 FALSE_P
+                 FALSE_P FOR
                  IN IS
                  LIMIT
                  MATCH MERGE
@@ -122,6 +122,9 @@
 /* UNWIND clause */
 %type <node> unwind
 
+/* list comprehension */
+%type <node> list_comprehension
+
 /* SET and REMOVE clause */
 %type <node> set set_item remove remove_item
 %type <list> set_item_list remove_item_list
@@ -139,6 +142,9 @@
 
 /* common */
 %type <node> where_opt
+
+/* list comprehension optional mapping expression */
+%type <node> mapping_expr_opt
 
 /* pattern */
 %type <list> pattern simple_path_opt_parens simple_path
@@ -235,6 +241,12 @@ static bool is_A_Expr_a_comparison_operation(A_Expr *a);
 static Node *build_comparison_expression(Node *left_grammar_node,
                                          Node *right_grammar_node,
                                          char *opr_name, int location);
+// list_comprehension
+static Node *build_list_comprehension_node(char *var_name, Node *expr,
+                                           Node *where, Node *mapping_expr,
+                                           int var_loc, int expr_loc,
+                                           int where_loc,int mapping_loc);
+
 %}
 %%
 
@@ -919,6 +931,8 @@ unwind:
 
             n = make_ag_node(cypher_unwind);
             n->target = res;
+            n->where = NULL;
+            n->collect = NULL;
             $$ = (Node *) n;
         }
 
@@ -1553,6 +1567,7 @@ expr:
             $$ = make_typecast_expr($1, $3, @2);
         }
     | expr_atom
+    | list_comprehension
     ;
 
 expr_opt:
@@ -1757,6 +1772,25 @@ list:
         }
     ;
 
+list_comprehension:
+    '[' FOR var_name IN expr where_opt mapping_expr_opt ']'
+        {
+            $$ = build_list_comprehension_node($3, $5, $6, $7,
+                                               @3, @5, @6, @7);
+        }
+    ;
+
+mapping_expr_opt:
+    /* empty */
+        {
+            $$ = NULL;
+        }
+    | '|' expr
+        {
+            $$ = $2;
+        }
+    ;
+
 expr_case:
     CASE expr expr_case_when_list expr_case_default END_P
         {
@@ -1863,7 +1897,7 @@ var_name:
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("%s is only for internal use", AGE_DEFAULT_PREFIX),
-                    ag_scanner_errposition(@1, scanner)));   
+                    ag_scanner_errposition(@1, scanner)));
         }
     }
     ;
@@ -1925,6 +1959,7 @@ safe_keywords:
     | ENDS       { $$ = pnstrdup($1, 4); }
     | EXISTS     { $$ = pnstrdup($1, 6); }
     | EXPLAIN    { $$ = pnstrdup($1, 7); }
+    | FOR        { $$ = pnstrdup($1, 3); }
     | IN         { $$ = pnstrdup($1, 2); }
     | IS         { $$ = pnstrdup($1, 2); }
     | LIMIT      { $$ = pnstrdup($1, 6); }
@@ -2409,6 +2444,7 @@ static Node *build_comparison_expression(Node *left_grammar_node,
     return result_expr;
 }
 
+/* helper function to build a VLE relation grammar node */
 static cypher_relationship *build_VLE_relation(List *left_arg,
                                                cypher_relationship *cr,
                                                Node *right_arg,
@@ -2564,4 +2600,97 @@ static cypher_relationship *build_VLE_relation(List *left_arg,
                                     cr_location);
     /* return the VLE relation node */
     return cr;
+}
+
+/* helper function to build a list_comprehension grammar node */
+static Node *build_list_comprehension_node(char *var_name, Node *expr,
+                                           Node *where, Node *mapping_expr,
+                                           int var_loc, int expr_loc,
+                                           int where_loc, int mapping_loc)
+{
+    ResTarget *res = NULL;
+    cypher_unwind *unwind = NULL;
+    NullTest *ntinn = NULL;
+    NullTest *ntisn = NULL;
+    ColumnRef *cref = NULL;
+    Node *where_conditions = NULL;
+
+    /*
+     * Build the ResTarget node for the UNWIND variable var_name attached to
+     * expr.
+     */
+    res = makeNode(ResTarget);
+    res->name = var_name;
+    res->val = (Node *)expr;
+    res->location = expr_loc;
+
+    /* build the UNWIND node */
+    unwind = make_ag_node(cypher_unwind);
+    unwind->target = res;
+
+    /* we need to filter out input expressions that are SQL NULL */
+    ntinn = makeNode(NullTest);
+    ntinn->arg = (Expr *)expr;
+    ntinn->nulltesttype = IS_NOT_NULL;
+    ntinn->location = expr_loc;
+
+    /*
+     * We need to make a ColumnRef of var_name so that it can be used as an expr
+     * for the where clause part of unwind.
+     */
+    cref = makeNode(ColumnRef);
+    cref->fields = list_make1(makeString(var_name));
+    cref->location = var_loc;
+
+    /*
+     * We need to allow NULL results from the unwind variable var_name
+     * because we've embedded a NULL at the end of lists. This is to
+     * allow empty lists, or lists with selected out contents, to pass
+     * through to collect.
+     */
+    ntisn = makeNode(NullTest);
+    ntisn->arg = (Expr *)cref;
+    ntisn->nulltesttype = IS_NULL;
+    ntisn->location = var_loc;
+
+    /*
+     * If we have an optional where, we need to build the additional conditions
+     * for NULL var_name values.
+     */
+    if (where != NULL)
+    {
+        Node *or_cond = NULL;
+
+        /* where the where expr is true OR the variable value is NULL */
+        or_cond =  make_or_expr(where, (Node *)ntisn, where_loc);
+        /* where the input expr is NOT NULL AND the OR condition is true */
+        where_conditions = make_and_expr((Node *)ntinn, or_cond, where_loc);
+    }
+    /* otherwise we only need to add the condition for NULL expressions */
+    else
+    {
+        where_conditions = (Node *)ntinn;
+    }
+    unwind->where = where_conditions;
+
+    /* if there is a mapping function, add its arg to collect */
+    if (mapping_expr != NULL)
+    {
+        unwind->collect = make_function_expr(list_make1(makeString("collect")),
+                                             list_make1(mapping_expr),
+                                             mapping_loc);
+    }
+    /*
+     * Otherwise, we need to add in the ColumnRef of the variable var_name as
+     * the arg to collect instead. This implies that the RETURN variable is
+     * var_name.
+     */
+    else
+    {
+        unwind->collect = make_function_expr(list_make1(makeString("collect")),
+                                             list_make1(cref), mapping_loc);
+    }
+
+    /* return the UNWIND node */
+    return (Node *)unwind;
 }

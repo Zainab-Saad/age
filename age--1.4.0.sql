@@ -4306,10 +4306,11 @@ IMMUTABLE
 PARALLEL SAFE
 AS 'MODULE_PATHNAME';
 
-CREATE FUNCTION ag_catalog.age_unnest(agtype)
+CREATE FUNCTION ag_catalog.age_unnest(agtype,
+                                      list_comprehension boolean default false)
 RETURNS SETOF agtype
 LANGUAGE c
-IMMUTABLE
+STABLE
 PARALLEL SAFE
 AS 'MODULE_PATHNAME';
 

@@ -2849,6 +2849,53 @@ SELECT * FROM cypher('list',$$ MATCH p=(n:xyz)-[e]->() SET n.array=[0, 1, 2, 3, 
 -- pg_typeof
 SELECT * FROM cypher('expr', $$MATCH (u) RETURN toString(pg_catalog.pg_typeof(u.id)) $$) AS (u agtype);
 
+--
+-- List Comprehension
+--
+
+SELECT create_graph('list_comprehension');
+
+SELECT * from cypher('list_comprehension', $$ CREATE (u {list: [0, 2, 4, 6, 8, 10, 12]}) RETURN u $$) as (result agtype);
+SELECT * from cypher('list_comprehension', $$ CREATE (u {list: [1, 3, 5, 7, 9, 11, 13]}) RETURN u $$) as (result agtype);
+SELECT * from cypher('list_comprehension', $$ CREATE (u {list: []}) RETURN u $$) as (result agtype);
+
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2)] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2)][2] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2)][1..4] $$) AS (result agtype);
+
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) where u % 3 = 0] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) where u % 3 = 0][2] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) where u % 3 = 0][0..4] $$) AS (result agtype);
+
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) where u % 3 = 0 | u^2 ] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) where u % 3 = 0 | u^2 ][3] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) where u % 3 = 0 | u^2 ][1..5] $$) AS (result agtype);
+
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) | u^2 ] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) | u^2 ][0] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ RETURN [FOR u IN range(1, 30, 2) | u^2 ][0..2] $$) AS (result agtype);
+
+SELECT * FROM cypher('list_comprehension', $$ MATCH (u) RETURN (u) $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH () RETURN [FOR i IN range(0, 20, 2) where i % 3 = 0 ] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH () RETURN [FOR i IN range(0, 20, 2) where i % 3 = 0 | i^2 ] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH (u) RETURN [FOR i IN range(0, 20, 2) where i % 3 = 0 | i^2 ] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH p=() RETURN [FOR i IN range(0, 20, 2) where i % 3 = 0 | i^2 ] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH p=(u) RETURN [FOR i IN range(0, 20, 2) where i % 3 = 0 | i^2 ] $$) AS (result agtype);
+
+SELECT * from cypher('list_comprehension', $$ CREATE (u) RETURN u $$) as (result agtype);
+
+SELECT * FROM cypher('list_comprehension', $$ MATCH (u) RETURN [FOR i IN u.list] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH (u) RETURN [FOR i IN u.list where i % 3 = 0] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH (u) RETURN [FOR i IN u.list where i % 3 = 0 | i/3] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH (u) RETURN [FOR i IN u.list where i % 3 = 0 | i/3][1] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH (u) RETURN [FOR i IN u.list where i % 3 = 0 | i/3][0..2] $$) AS (result agtype);
+SELECT * FROM cypher('list_comprehension', $$ MATCH (u) RETURN [FOR i IN u.list where i % 3 = 0 | i/3][0..2][1] $$) AS (result agtype);
+
+--
+-- Cleanup
+--
+SELECT * FROM drop_graph('list_comprehension', true);
+
 -- issue: 395 aggregate function collect() incorrect container for operation
 SELECT create_graph('graph_395');
 SELECT * FROM cypher('graph_395', $$ CREATE (n:Project {name: 'Project A'}),
