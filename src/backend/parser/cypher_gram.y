@@ -34,6 +34,7 @@
 #include "parser/cypher_gram.h"
 #include "parser/cypher_parse_node.h"
 #include "parser/scansup.h"
+#include "parser/cypher_label_expr.h"
 #include "catalog/ag_label.h"
 
 // override the default action for locations
@@ -1275,10 +1276,7 @@ path_node:
             n = make_ag_node(cypher_node);
             n->name = $2;
             n->parsed_name = $2;
-            n->label_expr = (cypher_label_expr *) $3;
-            n->label_expr->kind = LABEL_KIND_VERTEX;
-            n->label = NULL;        // TODO: to be deprecated
-            n->parsed_label = NULL; // TODO; to be deprecated
+            n->label_expr = (cypher_label_expr *)$3;
             n->props = $4;
             n->location = @2;
 
@@ -1324,10 +1322,7 @@ path_relationship_body:
             n = make_ag_node(cypher_relationship);
             n->name = $2;
             n->parsed_name = $2;
-            n->label_expr = (cypher_label_expr *) $3;
-            n->label_expr->kind = LABEL_KIND_EDGE;
-            n->label = NULL;        // TODO: to be deprecated
-            n->parsed_label = NULL; // TODO; to be deprecated
+            n->label_expr = (cypher_label_expr *)$3;
             n->varlen = $4;
             n->props = $5;
 
@@ -1341,8 +1336,7 @@ path_relationship_body:
             n = make_ag_node(cypher_relationship);
             n->name = NULL;
             n->parsed_name = NULL;
-            n->label = NULL;
-            n->parsed_label = NULL;
+            n->label_expr = make_ag_node(cypher_label_expr);
             n->varlen = NULL;
             n->props = NULL;
 
@@ -1362,6 +1356,7 @@ label_expr:
         {
             cypher_label_expr *n;
             n = make_ag_node(cypher_label_expr);
+            n->type = LABEL_EXPR_TYPE_SINGLE;
             n->label_names = list_make1(makeString($2));
 
             $$ = (Node *) n;
@@ -2795,10 +2790,10 @@ static cypher_relationship *build_VLE_relation(List *left_arg,
      * we need to create a variable name for the left node.
      */
     if ((cnl->name == NULL && length > 1) ||
-        (cnl->name == NULL && cnl->label != NULL) ||
+        (cnl->name == NULL && !LABEL_EXPR_IS_EMPTY(cnl->label_expr)) ||
         (cnl->name == NULL && cnl->props != NULL) ||
         (cnl->name == NULL && cnr->name != NULL) ||
-        (cnl->name == NULL && cnr->label != NULL) ||
+        (cnl->name == NULL && !LABEL_EXPR_IS_EMPTY(cnr->label_expr)) ||
         (cnl->name == NULL && cnr->props != NULL))
     {
         cnl->name = create_unique_name(AGE_DEFAULT_PREFIX"vle_function_start_var");
@@ -2831,7 +2826,7 @@ static cypher_relationship *build_VLE_relation(List *left_arg,
      * done in the transform phase.
      */
     if (cnr->name == NULL &&
-        (cnr->label != NULL || cnr->props != NULL))
+        (!LABEL_EXPR_IS_EMPTY(cnr->label_expr) || cnr->props != NULL))
     {
         cnr->name = create_unique_name(AGE_DEFAULT_PREFIX"vle_function_end_var");
     }
@@ -2857,13 +2852,17 @@ static cypher_relationship *build_VLE_relation(List *left_arg,
     }
 
     /* build the required edge arguments */
-    if (cr->label == NULL)
+    if (LABEL_EXPR_IS_EMPTY(cr->label_expr))
     {
         eargs = lappend(eargs, make_null_const(location));
     }
     else
     {
-        eargs = lappend(eargs, make_string_const(cr->label, location));
+        char *label_name =
+            !LABEL_EXPR_IS_EMPTY(cr->label_expr) ?
+                (char *)strVal(linitial(cr->label_expr->label_names)) :
+                "";
+        eargs = lappend(eargs, make_string_const(label_name, location));
     }
     if (cr->props == NULL)
     {
