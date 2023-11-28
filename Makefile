@@ -104,11 +104,11 @@ REGRESS = scan \
           age_global_graph \
           age_load \
           index \
+          multiple_label \
           analyze \
           graph_generation \
           name_validation \
           jsonb_operators \
-          multiple_label \
           drop
 
 srcdir=`pwd`
