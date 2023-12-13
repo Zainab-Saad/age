@@ -78,8 +78,8 @@ EXTENSION = age
 
 #SQLS = $(sort ($(wildcard sql/*.sql)))
 SQLS := $(shell cat sql/sql_files)
-SQLS := $(addprefix sql/,$(SQLS)) 
-SQLS := $(addsuffix .sql,$(SQLS)) 
+SQLS := $(addprefix sql/,$(SQLS))
+SQLS := $(addsuffix .sql,$(SQLS))
 
 DATA_built = $(age_sql)
 
@@ -104,11 +104,11 @@ REGRESS = scan \
           age_global_graph \
           age_load \
           index \
-          multiple_label \
           analyze \
           graph_generation \
           name_validation \
           jsonb_operators \
+          multiple_label \
           drop
 
 srcdir=`pwd`
