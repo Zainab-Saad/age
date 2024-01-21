@@ -65,12 +65,31 @@ TargetEntry *transform_cypher_item(cypher_parsestate *cpstate, Node *node,
  * Helper function to determine if the passed node has a list_comprehension
  * node embedded in it.
  */
-static bool has_a_cypher_list_comprehension_node(Node *expr)
+bool has_a_cypher_list_comprehension_node(Node *expr)
 {
     /* return false on NULL input */
     if (expr == NULL)
     {
         return false;
+    }
+
+    if (nodeTag(expr) == T_A_Expr)
+    {
+        // we need to recurse into the left and right nodes
+        // to check if there is an unwind node in there
+        A_Expr *a_expr = (A_Expr *)expr;
+
+        /* check the left node */
+        if (has_a_cypher_list_comprehension_node(a_expr->lexpr))
+        {
+            return true;
+        }
+
+        /* check the right node */
+        if (has_a_cypher_list_comprehension_node(a_expr->rexpr))
+        {
+            return true;
+        }
     }
 
     /* if this is an A_Indirection, because they can operate on lists */
@@ -81,20 +100,45 @@ static bool has_a_cypher_list_comprehension_node(Node *expr)
     }
 
     /* if expr is a cypher_unwind */
-    if (nodeTag(expr) == T_ExtensibleNode &&
-        is_ag_node(expr, cypher_unwind))
+    if (nodeTag(expr) == T_ExtensibleNode)
     {
-        cypher_unwind *cu = NULL;
-
-        cu = (cypher_unwind *)expr;
-
-        /* if it is a list comprehension node, return true */
-        if (cu->collect != NULL)
+        if (is_ag_node(expr, cypher_unwind))
         {
-            return true;
+            cypher_unwind *cu = NULL;
+
+            cu = (cypher_unwind *)expr;
+
+            /* if it is a list comprehension node, return true */
+            if (cu->collect != NULL)
+            {
+                return true;
+            }
+        }
+        else if (is_ag_node(expr, cypher_map))
+        {
+            cypher_map *cm = NULL;
+            ListCell *li;
+
+            cm = (cypher_map *)expr;
+
+            /* check each key and value for a list comprehension */
+            li = list_head(cm->keyvals);
+            while (li != NULL)
+            {
+                Node *val;
+
+                li = lnext(cm->keyvals, li);
+                val = lfirst(li);
+                li = lnext(cm->keyvals, li);
+
+                // check the value
+                if (has_a_cypher_list_comprehension_node(val))
+                {
+                    return true;
+                }
+            }
         }
     }
-
     /* otherwise, return false */
     return false;
 }
