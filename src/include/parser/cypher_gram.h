@@ -34,6 +34,11 @@
 // override the default data type of locations (yylloc)
 #define YYLTYPE int
 
+#define IS_LIST_COMPREHENSION_NODE(node) \
+    (nodeTag(node) == T_ExtensibleNode \
+        && is_ag_node(node, cypher_unwind) \
+        &&((cypher_unwind *)node)->collect)
+
 /*
  * Extra data that is passed to the generated parser.
  * The resulting abstract syntax tree is stored in result field.

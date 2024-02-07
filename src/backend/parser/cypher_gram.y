@@ -99,8 +99,8 @@
 %type <node> reading_clause updating_clause
 
 /* RETURN and WITH clause */
-%type <node> return return_item sort_item skip_opt limit_opt with
-%type <list> return_item_list order_by_opt sort_item_list
+%type <node> return return_item sort_item skip_opt limit_opt
+%type <list> return_item_list order_by_opt sort_item_list with
 %type <integer> order_opt
 
 /* MATCH clause */
@@ -254,6 +254,10 @@ static Node *build_list_comprehension_node(char *var_name, Node *expr,
                                            Node *where, Node *mapping_expr,
                                            int var_loc, int expr_loc,
                                            int where_loc,int mapping_loc);
+
+static List *build_cypher_with_list(List *items, List *order_by, Node *skip,
+                                    Node *limit, Node *where, int items_loc,
+                                    void **scanner,bool is_distinct);
 
 %}
 %%
@@ -544,7 +548,7 @@ query_part_init:
         }
     | query_part_init reading_clause_list updating_clause_list_0 with
         {
-            $$ = lappend(list_concat(list_concat($1, $2), $3), $4);
+            $$ = list_concat(list_concat(list_concat($1, $2), $3), $4);
         }
     ;
 
@@ -847,66 +851,12 @@ limit_opt:
 with:
     WITH DISTINCT return_item_list order_by_opt skip_opt limit_opt where_opt
         {
-            ListCell *li;
-            cypher_with *n;
-
-            // check expressions are aliased
-            foreach (li, $3)
-            {
-                ResTarget *item = lfirst(li);
-
-                // variable does not have to be aliased
-                if (IsA(item->val, ColumnRef) || item->name)
-                    continue;
-
-                ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                         errmsg("expression item must be aliased"),
-                         errhint("Items can be aliased by using AS."),
-                         ag_scanner_errposition(item->location, scanner)));
-            }
-
-            n = make_ag_node(cypher_with);
-            n->distinct = true;
-            n->items = $3;
-            n->order_by = $4;
-            n->skip = $5;
-            n->limit = $6;
-            n->where = $7;
-
-            $$ = (Node *)n;
+            $$ = build_cypher_with_list($3, $4, $5, $6, $7, @3, scanner, true);
         }
     | WITH return_item_list order_by_opt skip_opt limit_opt
     where_opt
         {
-            ListCell *li;
-            cypher_with *n;
-
-            // check expressions are aliased
-            foreach (li, $2)
-            {
-                ResTarget *item = lfirst(li);
-
-                // variable does not have to be aliased
-                if (IsA(item->val, ColumnRef) || item->name)
-                    continue;
-
-                ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                         errmsg("expression item must be aliased"),
-                         errhint("Items can be aliased by using AS."),
-                         ag_scanner_errposition(item->location, scanner)));
-            }
-
-            n = make_ag_node(cypher_with);
-            n->distinct = false;
-            n->items = $2;
-            n->order_by = $3;
-            n->skip = $4;
-            n->limit = $5;
-            n->where = $6;
-
-            $$ = (Node *)n;
+            $$ = build_cypher_with_list($2, $3, $4, $5, $6, @2, scanner, false);
         }
     ;
 
@@ -3028,4 +2978,109 @@ static Node *build_list_comprehension_node(char *var_name, Node *expr,
 
     /* return the UNWIND node */
     return (Node *)unwind;
+}
+
+static List *build_cypher_with_list(List *items, List *order_by, Node *skip,
+                                    Node *limit, Node *where, int items_loc,
+                                    void **scanner,bool is_distinct)
+{
+    ListCell *li;
+    List *with_list = NIL, *prev_list_comp_name = NIL;
+    int list_comp = 0;
+    cypher_with *n;
+    ResTarget *rt;
+    ColumnRef *cr;
+
+    // check expressions are aliased
+    foreach (li, items)
+    {
+        ResTarget *item = lfirst(li);
+
+        if (IS_LIST_COMPREHENSION_NODE(item->val))
+        {
+            list_comp++;
+        }
+
+        // variable does not have to be aliased
+        if (IsA(item->val, ColumnRef) || item->name)
+        {
+            continue;
+        }
+
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("expression item must be aliased"),
+                    errhint("Items can be aliased by using AS."),
+                    ag_scanner_errposition(items_loc, scanner)));
+    }
+
+    if (list_comp <= 1)
+    {
+        n = make_ag_node(cypher_with);
+        n->distinct = is_distinct;
+        n->items = items;
+        n->order_by = order_by;
+        n->skip = skip;
+        n->limit = limit;
+        n->where = where;
+
+        with_list = lappend(with_list, (Node *)n);
+    }
+    else
+    {
+        List *_cpy = NIL;
+
+        n = make_ag_node(cypher_with);
+        n->distinct = is_distinct;
+        n->order_by = order_by;
+        n->skip = skip;
+        n->limit = limit;
+        n->where = where;
+
+        // add all the non list comp nodes to items list first
+        foreach(li, items)
+        {
+            ResTarget *item = lfirst(li);
+
+            if (!IS_LIST_COMPREHENSION_NODE(item->val))
+            {
+                _cpy = lappend(_cpy, lfirst(li));
+            }
+        }
+
+        foreach(li, items)
+        {
+            ResTarget *item = lfirst(li);
+
+            n = make_ag_node(cypher_with);
+            n->distinct = is_distinct;
+            n->order_by = order_by;
+            n->skip = skip;
+            n->limit = limit;
+            n->where = where;
+
+            if (IS_LIST_COMPREHENSION_NODE(item->val))
+            {
+                n->items =
+                    prev_list_comp_name == NIL
+                    ? list_concat_copy(_cpy, list_make1(lfirst(li)))
+                    : list_concat(list_concat_copy(_cpy,
+                                   list_copy_deep(prev_list_comp_name)),
+                                   list_make1(lfirst(li)));
+
+                with_list = lappend(with_list, (Node *)n);
+                rt = makeNode(ResTarget);
+                cr = makeNode(ColumnRef);
+                cr->fields = list_make1(makeString(item->name));
+                cr->location = items_loc;
+
+                rt->val = (Node *)cr;
+
+                prev_list_comp_name = lappend(prev_list_comp_name,
+                                              (Node *)rt);
+            }
+        }
+    }
+
+    return with_list;
 }
