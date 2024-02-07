@@ -1417,3 +1417,41 @@ static void fill_label_cache_data(label_cache_data *cache_data,
     Assert(!is_null);
     cache_data->rel_kind = DatumGetChar(value);
 }
+
+// SELECT relation FROM ag_label WHERE allrelations @> '{"multiple_label.\"_agr_AB\""}'::regclass[];
+List *search_all_relations_contains_label(char *rel_name, Oid relid)
+{
+    HASH_SEQ_STATUS hash_seq;
+    List *result = NIL;
+
+    if (label_relation_cache_hash == NULL)
+    {
+        ereport(ERROR,
+                    (errmsg_internal("label (relation) not initialized")));
+    }
+    hash_seq_init(&hash_seq, label_relation_cache_hash);
+    for (;;)
+    {
+        label_relation_cache_entry *entry;
+        label_cache_data lcd;
+
+        entry = hash_seq_search(&hash_seq);
+
+        if (!entry)
+        {
+            return result;
+        }
+
+        lcd = entry->data;
+
+        if (list_member_oid(lcd.allrelations, relid))
+        {
+            if (strcmp(NameStr(lcd.name), rel_name) != 0)
+            {
+                result = lappend(result, makeString(NameStr(lcd.name)));
+            }
+        }
+
+    }
+    return result;
+}

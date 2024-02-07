@@ -38,6 +38,7 @@ void out_cypher_match(StringInfo str, const ExtensibleNode *node);
 void out_cypher_create(StringInfo str, const ExtensibleNode *node);
 void out_cypher_set(StringInfo str, const ExtensibleNode *node);
 void out_cypher_set_item(StringInfo str, const ExtensibleNode *node);
+void out_cypher_set_label_item(StringInfo str, const ExtensibleNode *node);
 void out_cypher_delete(StringInfo str, const ExtensibleNode *node);
 void out_cypher_unwind(StringInfo str, const ExtensibleNode *node);
 void out_cypher_merge(StringInfo str, const ExtensibleNode *node);
@@ -82,6 +83,7 @@ void out_cypher_target_node(StringInfo str, const ExtensibleNode *node);
 // set/remove private data structures
 void out_cypher_update_information(StringInfo str, const ExtensibleNode *node);
 void out_cypher_update_item(StringInfo str, const ExtensibleNode *node);
+void out_cypher_update_label_item(StringInfo str, const ExtensibleNode *node);
 
 // delete private data structures
 void out_cypher_delete_information(StringInfo str, const ExtensibleNode *node);

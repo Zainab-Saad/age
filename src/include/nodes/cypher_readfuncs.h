@@ -48,6 +48,7 @@ void read_cypher_label_expr(struct ExtensibleNode *node);
 // set/remove data structures
 void read_cypher_update_information(struct ExtensibleNode *node);
 void read_cypher_update_item(struct ExtensibleNode *node);
+void read_cypher_update_label_item(struct ExtensibleNode *node);
 
 // delete data structures
 void read_cypher_delete_information(struct ExtensibleNode *node);

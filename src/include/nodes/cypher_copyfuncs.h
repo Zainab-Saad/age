@@ -43,6 +43,7 @@ void copy_cypher_label_expr(ExtensibleNode *newnode, const ExtensibleNode *from)
 // set/remove data structures
 void copy_cypher_update_information(ExtensibleNode *newnode, const ExtensibleNode *from);
 void copy_cypher_update_item(ExtensibleNode *newnode, const ExtensibleNode *from);
+void copy_cypher_update_label_item(ExtensibleNode *newnode, const ExtensibleNode *from);
 
 // delete data structures
 void copy_cypher_delete_information(ExtensibleNode *newnode, const ExtensibleNode *from);

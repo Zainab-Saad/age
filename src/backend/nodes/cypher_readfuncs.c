@@ -244,6 +244,7 @@ void read_cypher_update_information(struct ExtensibleNode *node)
     READ_LOCALS(cypher_update_information);
 
     READ_NODE_FIELD(set_items);
+    READ_NODE_FIELD(label_items);
     READ_UINT_FIELD(flags);
     READ_INT_FIELD(tuple_position);
     READ_STRING_FIELD(graph_name);
@@ -265,6 +266,16 @@ void read_cypher_update_item(struct ExtensibleNode *node)
     READ_NODE_FIELD(qualified_name);
     READ_BOOL_FIELD(remove_item);
     READ_BOOL_FIELD(is_add);
+}
+
+void read_cypher_update_label_item(struct ExtensibleNode *node)
+{
+    READ_LOCALS(cypher_update_label_item);
+
+    READ_INT_FIELD(entity_position);
+    READ_NODE_FIELD(updated_label_rel_names);
+    READ_NODE_FIELD(prev_label_rel_names);
+    READ_NODE_FIELD(updated_labels_list);
 }
 
 /*

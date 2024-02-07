@@ -39,6 +39,7 @@ typedef enum ag_node_tag
     cypher_create_t,
     cypher_set_t,
     cypher_set_item_t,
+    cypher_set_label_item_t,
     cypher_delete_t,
     cypher_unwind_t,
     cypher_merge_t,
@@ -72,6 +73,7 @@ typedef enum ag_node_tag
     // set/remove data structures
     cypher_update_information_t,
     cypher_update_item_t,
+    cypher_update_label_item_t,
     // delete data structures
     cypher_delete_information_t,
     cypher_delete_item_t,

@@ -21,7 +21,9 @@
 #define AG_CYPHER_LABEL_EXPR_H
 
 #include "postgres.h"
+
 #include "nodes/cypher_nodes.h"
+#include "utils/agtype.h"
 
 /*
  * Functions and macros associated with the cypher node: cypher_label_expr
@@ -66,5 +68,7 @@ void check_reserved_label_name(char *label_name);
 
 List *list_intersection_oid(List *list1, const List *list2);
 int list_string_cmp(const ListCell *a, const ListCell *b);
+List *get_label_names_from_intr(char* rel_name, Oid relid);
+char *label_relname_from_agtv(agtype_value *label_agtv);
 
 #endif

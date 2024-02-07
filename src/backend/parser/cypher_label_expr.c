@@ -412,6 +412,35 @@ char *label_expr_relname(cypher_label_expr *label_expr, char label_expr_kind)
     }
 }
 
+char *label_relname_from_agtv(agtype_value *label_agtv)
+{
+    /*
+     * generates a name for intersection relation
+     * i.e. for CREATE (:A:B:C), _agr_ABC
+     */
+    StringInfo relname_strinfo;
+    char *relname;
+
+    relname_strinfo = makeStringInfo();
+
+    if (label_agtv->val.array.num_elems > 1)
+    {
+        appendStringInfoString(relname_strinfo, INTR_REL_PREFIX);
+    }
+
+    for (int i = 0; i < label_agtv->val.array.num_elems; i++)
+    {
+        agtype_value label_name_agtv = label_agtv->val.array.elems[i];
+        char *label_name = label_name_agtv.val.string.val;
+        appendStringInfoString(relname_strinfo, label_name);
+    }
+
+    relname = relname_strinfo->data;
+    pfree(relname_strinfo);
+
+    return relname;
+}
+
 /*
  * Returns if two label expressions are equal.
  */
@@ -649,4 +678,82 @@ int list_string_cmp(const ListCell *a, const ListCell *b)
     Assert(IsA(nb, String));
 
     return strcmp(strVal(na), strVal(nb));
+}
+
+/*
+ * function to take in the table label name and return a list of these names
+ * _agr_ABC would return [A, B, C]
+ * SELECT relation FROM ag_label WHERE allrelations @> '{"multiple_label.\"_agr_AB\""}'::regclass[];
+ */
+List *get_label_names_from_intr(char* rel_name, Oid relid)
+{
+    List *result_lst = NIL;
+    // check if the table is an intersection table or not
+    if (strstr(rel_name, INTR_REL_PREFIX) != NULL)
+    {
+        Relation ag_label;
+        SysScanDesc scan_desc;
+        HeapTuple tuple;
+        ag_label = table_open(ag_label_relation_id(), AccessShareLock);
+
+
+        scan_desc = systable_beginscan(ag_label, InvalidOid, false, NULL, 0, NULL);
+
+        /* reads each row of ag_label */
+        while (true)
+        {
+            bool isNull;
+            Datum relation;
+            Datum ag_label_allrelations;
+            Datum *elemsp;
+            bool *nullsp;
+            int nelemsp;
+            int i;
+
+            tuple = systable_getnext(scan_desc);
+            if (!HeapTupleIsValid(tuple))
+            {
+                break;
+            }
+
+            /* extracts allrelations and relation */
+            relation = heap_getattr(tuple, Anum_ag_label_relation,
+                                    RelationGetDescr(ag_label), &isNull);
+            Assert(!isNull);
+            ag_label_allrelations = heap_getattr(tuple, Anum_ag_label_allrelations,
+                                                RelationGetDescr(ag_label),
+                                                &isNull);
+            Assert(!isNull);
+
+            /* deconstructs allrelations to an array of Datums */
+            elemsp = palloc(sizeof(Datum));
+            nullsp = palloc(sizeof(bool));
+            deconstruct_array(DatumGetArrayTypeP(ag_label_allrelations),
+                            REGCLASSOID, 4, true, TYPALIGN_INT, &elemsp, &nullsp,
+                            &nelemsp);
+
+            /* for each item in allrelations */
+            for (i = 0; i < nelemsp; i++)
+            {
+                Oid item;
+
+                Assert(!nullsp[i]);
+
+                item = DatumGetObjectId(elemsp[i]);
+
+                /* argument `relation` is in allrelations */
+                if (item == relid && strcmp(get_rel_name(relation), rel_name) != 0)
+                {
+                    char *n = get_rel_name(relation);
+                    result_lst = lappend(result_lst, makeString(n));
+                }
+            }
+        }
+        systable_endscan(scan_desc);
+        table_close(ag_label, AccessShareLock);
+        return result_lst;
+    }
+
+    // it was single label
+    return list_make1(makeString(rel_name));
 }

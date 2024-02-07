@@ -50,11 +50,6 @@ static void rescan_cypher_delete(CustomScanState *node);
 static void process_delete_list(CustomScanState *node);
 
 static void check_for_connected_edges(CustomScanState *node);
-static agtype_value *extract_entity(CustomScanState *node,
-                                    TupleTableSlot *scanTupleSlot,
-                                    int entity_position);
-static void delete_entity(EState *estate, ResultRelInfo *resultRelInfo,
-                          HeapTuple tuple);
 
 const CustomExecMethods cypher_delete_exec_methods = {DELETE_SCAN_STATE_NAME,
                                                       begin_cypher_delete,
@@ -261,7 +256,7 @@ Node *create_cypher_delete_plan_state(CustomScan *cscan)
  * Extract the vertex or edge to be deleted, perform some type checking to
  * validate datum is an agtype vertex or edge.
  */
-static agtype_value *extract_entity(CustomScanState *node,
+agtype_value *extract_entity(CustomScanState *node,
                                     TupleTableSlot *scanTupleSlot,
                                     int entity_position)
 {
@@ -290,7 +285,7 @@ static agtype_value *extract_entity(CustomScanState *node,
  * Try and delete the entity that is describe by the HeapTuple in the table
  * described by the resultRelInfo.
  */
-static void delete_entity(EState *estate, ResultRelInfo *resultRelInfo,
+void delete_entity(EState *estate, ResultRelInfo *resultRelInfo,
                           HeapTuple tuple)
 {
     ResultRelInfo **saved_resultRels;

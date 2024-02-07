@@ -38,6 +38,7 @@ const char *node_names[] = {
     "cypher_create",
     "cypher_set",
     "cypher_set_item",
+    "cypher_set_label_item",
     "cypher_delete",
     "cypher_unwind",
     "cypher_merge",
@@ -61,6 +62,7 @@ const char *node_names[] = {
     "cypher_label_expr",
     "cypher_update_information",
     "cypher_update_item",
+    "cypher_update_label_item",
     "cypher_delete_information",
     "cypher_delete_item",
     "cypher_merge_information"
@@ -104,6 +106,7 @@ const ExtensibleNodeMethods node_methods[] = {
     DEFINE_NODE_METHODS(cypher_create),
     DEFINE_NODE_METHODS(cypher_set),
     DEFINE_NODE_METHODS(cypher_set_item),
+    DEFINE_NODE_METHODS(cypher_set_label_item),
     DEFINE_NODE_METHODS(cypher_delete),
     DEFINE_NODE_METHODS(cypher_unwind),
     DEFINE_NODE_METHODS(cypher_merge),
@@ -127,6 +130,7 @@ const ExtensibleNodeMethods node_methods[] = {
     DEFINE_NODE_METHODS_EXTENDED(cypher_label_expr),
     DEFINE_NODE_METHODS_EXTENDED(cypher_update_information),
     DEFINE_NODE_METHODS_EXTENDED(cypher_update_item),
+    DEFINE_NODE_METHODS_EXTENDED(cypher_update_label_item),
     DEFINE_NODE_METHODS_EXTENDED(cypher_delete_information),
     DEFINE_NODE_METHODS_EXTENDED(cypher_delete_item),
     DEFINE_NODE_METHODS_EXTENDED(cypher_merge_information)

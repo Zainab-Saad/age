@@ -244,6 +244,9 @@ static cypher_update_information *transform_cypher_set_item_list(cypher_parsesta
 static cypher_update_information *transform_cypher_remove_item_list(cypher_parsestate *cpstate,
                                                                     List *remove_item_list,
                                                                     Query *query);
+static cypher_update_information *transform_cypher_set_label_list(cypher_parsestate *cpstate,
+                                                                  List *set_label_list,
+                                                                  Query *query);
 // delete
 static Query *transform_cypher_delete(cypher_parsestate *cpstate,
                                       cypher_clause *clause);
@@ -1479,7 +1482,7 @@ static Query *transform_cypher_set(cypher_parsestate *cpstate,
     ParseState *pstate = (ParseState *)cpstate;
     cypher_set *self = (cypher_set *)clause->self;
     Query *query;
-    cypher_update_information *set_items_target_list;
+    cypher_update_information *set_items_target_list = NULL;
     TargetEntry *tle;
     FuncExpr *func_expr;
     char *clause_name;
@@ -1510,17 +1513,27 @@ static Query *transform_cypher_set(cypher_parsestate *cpstate,
         handle_prev_clause(cpstate, query, clause->prev, true);
     }
 
-    if (self->is_remove == true)
+    // if SET is for property assignment
+    if (self->items)
     {
-        set_items_target_list = transform_cypher_remove_item_list(cpstate,
-                                                                  self->items,
-                                                                  query);
+        if (self->is_remove == true)
+        {
+            set_items_target_list = transform_cypher_remove_item_list(cpstate,
+                                                                    self->items,
+                                                                    query);
+        }
+        else
+        {
+            set_items_target_list = transform_cypher_set_item_list(cpstate,
+                                                                self->items,
+                                                                query);
+        }
     }
-    else
+
+    // if SET is for label assignment
+    if (self->labels)
     {
-        set_items_target_list = transform_cypher_set_item_list(cpstate,
-                                                               self->items,
-                                                               query);
+        set_items_target_list = transform_cypher_set_label_list(cpstate, self->labels, query);
     }
 
     set_items_target_list->clause_name = clause_name;
@@ -1532,11 +1545,11 @@ static Query *transform_cypher_set(cypher_parsestate *cpstate,
     }
 
     func_expr = make_clause_func_expr(SET_CLAUSE_FUNCTION_NAME,
-                                      (Node *)set_items_target_list);
+                                    (Node *)set_items_target_list);
 
     // Create the target entry
     tle = makeTargetEntry((Expr *)func_expr, pstate->p_next_resno++,
-                          AGE_VARNAME_SET_CLAUSE, false);
+                        AGE_VARNAME_SET_CLAUSE, false);
     query->targetList = lappend(query->targetList, tle);
 
     query->rtable = pstate->p_rtable;
@@ -1661,6 +1674,7 @@ cypher_update_information *transform_cypher_set_item_list(
     cypher_update_information *info = make_ag_node(cypher_update_information);
 
     info->set_items = NIL;
+    info->label_items = NIL; // should remain NIL
     info->flags = 0;
 
     foreach (li, set_item_list)
@@ -1817,6 +1831,107 @@ cypher_update_information *transform_cypher_set_item_list(
 
         query->targetList = lappend(query->targetList, target_item);
         info->set_items = lappend(info->set_items, item);
+    }
+
+    return info;
+}
+
+static cypher_update_information *transform_cypher_set_label_list(
+    cypher_parsestate *cpstate, List *set_label_list, Query *query)
+{
+    ParseState *pstate = (ParseState *)cpstate;
+    ListCell *set_label_item;
+    cypher_update_information *info = make_ag_node(cypher_update_information);
+    info->set_items = NIL; // should remain NIL
+    info->label_items = NIL;
+    info->flags = 0;
+
+    foreach(set_label_item, set_label_list)
+    {
+        transform_entity *entity;
+        List *label_expr_relations;
+        ListCell *label_expr_rel;
+        cypher_node *node;
+        cypher_set_label_item *item =
+            (cypher_set_label_item *) lfirst(set_label_item);
+        cypher_update_label_item *update_item = make_ag_node(cypher_update_label_item);
+
+        update_item->updated_label_rel_names = NIL;
+        update_item->prev_label_rel_names = NIL;
+
+        if (LABEL_EXPR_TYPE(item->label_expr) == LABEL_EXPR_TYPE_OR)
+        {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("label expression type OR "
+                            "is not allowed in SET clause"),
+                    parser_errposition(pstate, item->location)));
+        }
+
+        entity = find_variable(cpstate, item->var_name);
+
+        if (!entity)
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                     errmsg("undefined reference to variable %s in SET clause",
+                            item->var_name),
+                            parser_errposition(pstate, item->location)));
+        }
+
+        if (entity->type != ENT_VERTEX)
+        {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("SET clause only supports label updation "
+                            "on vertices"),
+                    parser_errposition(pstate, item->location)));
+        }
+
+        node = entity->entity.node;
+
+        label_expr_relations =
+            get_label_expr_relations(node->label_expr,
+                                     LABEL_KIND_VERTEX, cpstate->graph_oid);
+
+        foreach(label_expr_rel, label_expr_relations)
+        {
+            RangeVar *rv;
+            cypher_label_expr *new_table_label_expr;
+            List *label_names, *final_list;
+
+            Oid relid = lfirst_oid(label_expr_rel);
+            char *label_expr_rel_name = get_rel_name(relid);
+
+            if (IS_DEFAULT_LABEL_VERTEX(label_expr_rel_name))
+            {
+                final_list = item->label_expr->label_names;
+            }
+            else
+            {
+                label_names = get_label_names_from_intr(label_expr_rel_name, relid);
+                final_list = list_concat_unique(label_names, item->label_expr->label_names);
+                list_sort(final_list, &list_string_cmp);
+            }
+
+            new_table_label_expr = make_ag_node(cypher_label_expr);
+            new_table_label_expr->type =
+                list_length(final_list) > 1 ? LABEL_EXPR_TYPE_AND : LABEL_EXPR_TYPE_SINGLE;
+            new_table_label_expr->label_names = final_list;
+
+            rv = create_label_expr_relations(cpstate->graph_oid, cpstate->graph_name,
+                                             new_table_label_expr,
+                                             LABEL_KIND_VERTEX);
+
+            update_item->prev_label_rel_names =
+                lappend(update_item->prev_label_rel_names, makeString(label_expr_rel_name));
+            update_item->updated_label_rel_names =
+                lappend(update_item->updated_label_rel_names, makeString(rv->relname));
+            update_item->updated_labels_list =
+                lappend(update_item->updated_labels_list, final_list);
+        }
+
+        update_item->entity_position = get_target_entry_resno(query->targetList,
+                                                              item->var_name);
+        info->label_items = lappend(info->label_items, update_item);
     }
 
     return info;

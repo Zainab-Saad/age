@@ -43,6 +43,8 @@ typedef struct cypher_sub_pattern
         List *pattern;
 } cypher_sub_pattern;
 
+typedef struct cypher_label_expr cypher_label_expr;
+
 /*
  * clauses
  */
@@ -91,6 +93,7 @@ typedef struct cypher_set
 {
     ExtensibleNode extensible;
     List *items; // a list of cypher_set_items
+    List *labels;
     bool is_remove; // true if this is REMOVE clause
     int location;
 } cypher_set;
@@ -103,6 +106,14 @@ typedef struct cypher_set_item
     bool is_add; // true if this is +=
     int location;
 } cypher_set_item;
+
+typedef struct cypher_set_label_item
+{
+    ExtensibleNode extensible;
+    char *var_name;
+    cypher_label_expr *label_expr;
+    int location;
+} cypher_set_label_item;
 
 typedef struct cypher_delete
 {
@@ -170,7 +181,7 @@ typedef enum
  * cypher_label_expr.c. If new fields are added to it, that function may need
  * to be updated.
  */
-typedef struct cypher_label_expr
+struct cypher_label_expr
 {
     ExtensibleNode extensible;
     cypher_label_expr_type type;
@@ -184,7 +195,7 @@ typedef struct cypher_label_expr
      * Note: It is assigned to rel->label_names. Be careful before free'ing.
      */
     List *label_names;
-} cypher_label_expr;
+};
 
 // ( name :label props )
 typedef struct cypher_node
@@ -435,6 +446,7 @@ typedef struct cypher_update_information
 {
     ExtensibleNode extensible;
     List *set_items;
+    List *label_items;  // list of cypher_update_label_item
     uint32 flags;
     AttrNumber tuple_position;
     char *graph_name;
@@ -452,6 +464,16 @@ typedef struct cypher_update_item
     bool remove_item;
     bool is_add;
 } cypher_update_item;
+
+// SET n:A:B, n:C:D => cypher_update_label_item consists of info for each comma seperated SET
+typedef struct cypher_update_label_item
+{
+    ExtensibleNode extensible;
+    AttrNumber entity_position;
+    List *updated_label_rel_names;
+    List *prev_label_rel_names;
+    List *updated_labels_list;
+} cypher_update_label_item;
 
 typedef struct cypher_delete_information
 {

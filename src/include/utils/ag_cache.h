@@ -52,5 +52,6 @@ label_cache_data *search_label_graph_oid_cache(Oid graph, int32 id);
 label_cache_data *search_label_relation_cache(Oid relation);
 label_cache_data *search_label_seq_name_graph_cache(const char *name, Oid graph);
 List *search_label_allrelations_cache(Oid relation);
+List *search_all_relations_contains_label(char *rel_name, Oid relid);
 
 #endif

@@ -126,8 +126,8 @@
 %type <node> unwind
 
 /* SET and REMOVE clause */
-%type <node> set set_item remove remove_item
-%type <list> set_item_list remove_item_list
+%type <node> set set_item set_label remove remove_item
+%type <list> set_item_list set_label_list remove_item_list
 
 /* DELETE clause */
 %type <node> delete
@@ -981,6 +981,19 @@ set:
 
             n = make_ag_node(cypher_set);
             n->items = $2;
+            n->labels = NIL;
+            n->is_remove = false;
+            n->location = @1;
+
+            $$ = (Node *)n;
+        }
+    | SET set_label_list
+        {
+            cypher_set *n;
+
+            n = make_ag_node(cypher_set);
+            n->items = NIL;
+            n->labels = $2;
             n->is_remove = false;
             n->location = @1;
 
@@ -1020,6 +1033,32 @@ set_item:
             n->prop = $1;
             n->expr = $3;
             n->is_add = true;
+            n->location = @1;
+
+            $$ = (Node *)n;
+        }
+    ;
+
+set_label_list:
+    set_label
+        {
+            $$ = list_make1($1);
+        }
+    | set_label_list ',' set_label
+        {
+            $$ = lappend($1, $3);
+        }
+    ;
+
+set_label:
+    var_name label_expr_non_empty
+        {
+            cypher_set_label_item *n;
+
+            n = make_ag_node(cypher_set_label_item);
+            n->var_name = $1;
+            n->label_expr = (cypher_label_expr *)$2;
+            list_sort(n->label_expr->label_names, &list_string_cmp);
             n->location = @1;
 
             $$ = (Node *)n;

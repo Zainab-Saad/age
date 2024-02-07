@@ -22,6 +22,7 @@
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/xact.h"
+#include "commands/sequence.h"
 #include "executor/tuptable.h"
 #include "nodes/execnodes.h"
 #include "nodes/extensible.h"
@@ -30,7 +31,9 @@
 #include "rewrite/rewriteHandler.h"
 #include "storage/bufmgr.h"
 #include "utils/rel.h"
+#include "utils/lsyscache.h"
 
+#include "commands/label_commands.h"
 #include "executor/cypher_executor.h"
 #include "executor/cypher_utils.h"
 #include "nodes/cypher_nodes.h"
@@ -38,6 +41,7 @@
 #include "utils/graphid.h"
 #include "utils/ag_cache.h"
 #include "catalog/ag_label.h"
+#include "parser/cypher_label_expr.h"
 
 static void begin_cypher_set(CustomScanState *node, EState *estate,
                                 int eflags);
@@ -613,6 +617,187 @@ static void process_update_list(CustomScanState *node)
         /* increment loop index */
         lidx++;
     }
+
+    /* iterate through the SET label items */
+    foreach (lc, css->set_list->label_items)
+    {
+        agtype_value *original_entity_value, *id, *label, *properties;
+        ScanKeyData scan_keys[1];
+        TableScanDesc scan_desc;
+        ResultRelInfo *resultRelInfo;
+        HeapTuple heap_tuple;
+        int entity_position;
+        graph_cache_data *gcd;
+        char *updated_label_rel_name = NULL;
+        ListCell *prev_label, *updated_label, *updated_label_list;
+        Datum values[2];
+        bool nulls[2] = {false, false};
+        Relation label_relation;
+        HeapTuple tuple;
+        label_cache_data *lcd;
+        Oid obj_seq_id;
+        char* label_seq_name_str;
+        int64 entry_id;
+        graphid new_graphid;
+        Datum new_entity;
+        agtype_in_state *new_label_agis = palloc0(sizeof(agtype_in_state));
+
+        cypher_update_label_item *update_label = lfirst(lc);
+
+        entity_position = update_label->entity_position;
+
+        new_label_agis->res = push_agtype_value(&new_label_agis->parse_state, WAGT_BEGIN_ARRAY,
+                                                NULL);
+
+        /* skip if the entity is null */
+        if (scanTupleSlot->tts_isnull[entity_position - 1])
+        {
+            continue;
+        }
+
+        original_entity_value = extract_entity(node, scanTupleSlot,
+                                               entity_position);
+
+        id = GET_AGTYPE_VALUE_OBJECT_VALUE(original_entity_value, "id");
+        label = GET_AGTYPE_VALUE_OBJECT_VALUE(original_entity_value, "label");
+        properties = GET_AGTYPE_VALUE_OBJECT_VALUE(original_entity_value, "properties");
+
+        forthree(prev_label, update_label->prev_label_rel_names,
+                 updated_label, update_label->updated_label_rel_names,
+                 updated_label_list, update_label->updated_labels_list)
+        {
+            char *prev_label_str =
+                IS_DEFAULT_LABEL_VERTEX(strVal(lfirst(prev_label))) ? "" : strVal(lfirst(prev_label));
+            char *updated_label_str = strVal(lfirst(updated_label));
+
+            if (strcmp(prev_label_str, label_relname_from_agtv(label)) == 0)
+            {
+                ListCell *each_label;
+                updated_label_rel_name = updated_label_str;
+
+                foreach(each_label, lfirst(updated_label_list))
+                {
+                    char *each_label_str = strVal(lfirst(each_label));
+                    agtype_value *label_name_agtv = palloc0(sizeof(agtype_value));
+                    label_name_agtv->type = AGTV_STRING;
+                    label_name_agtv->val.string.val = each_label_str;
+                    label_name_agtv->val.string.len = strlen(each_label_str);
+                    new_label_agis->res = push_agtype_value(&new_label_agis->parse_state, WAGT_ELEM,
+                                                            label_name_agtv);
+                }
+                break;
+            }
+        }
+
+        new_label_agis->res = push_agtype_value(&new_label_agis->parse_state, WAGT_END_ARRAY,
+                                                NULL);
+
+        if (!updated_label_rel_name)
+        {
+            continue;
+        }
+
+        gcd = search_graph_name_cache(css->set_list->graph_name);
+        resultRelInfo = create_entity_result_rel_info(
+            estate, css->set_list->graph_name,
+            get_entity_relname(id->val.int_value, gcd->oid));
+
+        lcd = search_label_name_graph_cache(updated_label_rel_name, gcd->oid);
+
+        label_seq_name_str = NameStr(lcd->seq_name);
+        obj_seq_id = get_relname_relid(label_seq_name_str,
+                                       gcd->namespace);
+
+        entry_id = nextval_internal(obj_seq_id, true);
+
+        new_graphid = make_graphid(lcd->id, entry_id);
+
+        /*
+         * Setup the scan key to require the id field on-disc to match the
+         * entity's graphid.
+         */
+        if (original_entity_value->type == AGTV_VERTEX)
+        {
+            ScanKeyInit(&scan_keys[0], Anum_ag_label_vertex_table_id,
+                        BTEqualStrategyNumber, F_GRAPHIDEQ,
+                        GRAPHID_GET_DATUM(id->val.int_value));
+        }
+        else if (original_entity_value->type == AGTV_EDGE)
+        {
+            ScanKeyInit(&scan_keys[0], Anum_ag_label_edge_table_id,
+                        BTEqualStrategyNumber, F_GRAPHIDEQ,
+                        GRAPHID_GET_DATUM(id->val.int_value));
+        }
+        else
+        {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("DELETE clause can only delete vertices and edges")));
+        }
+
+        /*
+         * Setup the scan description, with the correct snapshot and scan keys.
+         */
+        estate->es_snapshot->curcid = GetCurrentCommandId(false);
+        estate->es_output_cid = GetCurrentCommandId(false);
+        scan_desc = table_beginscan(resultRelInfo->ri_RelationDesc,
+                                    estate->es_snapshot, 1, scan_keys);
+
+        /* Retrieve the tuple. */
+        heap_tuple = heap_getnext(scan_desc, ForwardScanDirection);
+
+        /*
+         * If the heap tuple still exists (It wasn't deleted after this variable
+         * was created) we can delete it. Otherwise, its safe to skip this
+         * delete.
+         */
+        if (!HeapTupleIsValid(heap_tuple))
+        {
+            table_endscan(scan_desc);
+            destroy_entity_result_rel_info(resultRelInfo);
+
+            continue;
+        }
+
+        /* At this point, we are ready to delete the node/vertex. */
+        delete_entity(estate, resultRelInfo, heap_tuple);
+
+        /* Close the scan and the relation. */
+        table_endscan(scan_desc);
+        destroy_entity_result_rel_info(resultRelInfo);
+
+        // insert the entity in new table
+
+        values[0] = GRAPHID_GET_DATUM(new_graphid);
+        values[1] = AGTYPE_P_GET_DATUM((agtype_value_to_agtype(properties)));
+
+        label_relation = table_open(get_label_relation(updated_label_rel_name, gcd->oid),
+                                    RowExclusiveLock);
+        tuple = heap_form_tuple(RelationGetDescr(label_relation),
+                                values, nulls);
+        heap_insert(label_relation, tuple,
+                    GetCurrentCommandId(true), 0, NULL);
+        table_close(label_relation, RowExclusiveLock);
+
+        CommandCounterIncrement();
+
+        new_entity =
+                make_vertex(GRAPHID_GET_DATUM(new_graphid),
+                            AGTYPE_P_GET_DATUM(agtype_value_to_agtype(new_label_agis->res)),
+                            AGTYPE_P_GET_DATUM(
+                                agtype_value_to_agtype(properties)));
+
+        /* place the datum in its tuple table slot position. */
+        scanTupleSlot->tts_values[update_label->entity_position - 1] = new_entity;
+
+        /*
+         * If the tuple table slot has paths, we need to inspect them to see if
+         * the updated entity is contained within them and replace the entity
+         * if it is.
+         */
+        update_all_paths(node,
+                         id->val.int_value, DATUM_GET_AGTYPE_P(new_entity));
+    }
+
     /* free our lookup array */
     pfree(luindex);
 }

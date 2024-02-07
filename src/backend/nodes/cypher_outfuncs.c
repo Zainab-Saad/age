@@ -164,6 +164,15 @@ void out_cypher_set_item(StringInfo str, const ExtensibleNode *node)
     WRITE_BOOL_FIELD(is_add);
 }
 
+void out_cypher_set_label_item(StringInfo str, const ExtensibleNode *node)
+{
+    DEFINE_AG_NODE(cypher_set_label_item);
+
+    WRITE_STRING_FIELD(var_name);
+    WRITE_NODE_FIELD(label_expr);
+    WRITE_LOCATION_FIELD(location);
+}
+
 // serialization function for the cypher_delete ExtensibleNode.
 void out_cypher_delete(StringInfo str, const ExtensibleNode *node)
 {
@@ -389,6 +398,7 @@ void out_cypher_update_information(StringInfo str, const ExtensibleNode *node)
     DEFINE_AG_NODE(cypher_update_information);
 
     WRITE_NODE_FIELD(set_items);
+    WRITE_NODE_FIELD(label_items);
     WRITE_INT32_FIELD(flags);
     WRITE_INT32_FIELD(tuple_position);
     WRITE_STRING_FIELD(graph_name);
@@ -407,6 +417,16 @@ void out_cypher_update_item(StringInfo str, const ExtensibleNode *node)
     WRITE_NODE_FIELD(qualified_name);
     WRITE_BOOL_FIELD(remove_item);
     WRITE_BOOL_FIELD(is_add);
+}
+
+void out_cypher_update_label_item(StringInfo str, const ExtensibleNode *node)
+{
+    DEFINE_AG_NODE(cypher_update_label_item);
+
+    WRITE_INT32_FIELD(entity_position);
+    WRITE_NODE_FIELD(updated_label_rel_names);
+    WRITE_NODE_FIELD(prev_label_rel_names);
+    WRITE_NODE_FIELD(updated_labels_list);
 }
 
 // serialization function for the cypher_delete_information ExtensibleNode.

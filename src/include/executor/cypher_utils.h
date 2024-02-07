@@ -131,5 +131,10 @@ HeapTuple insert_entity_tuple(ResultRelInfo *resultRelInfo,
 HeapTuple insert_entity_tuple_cid(ResultRelInfo *resultRelInfo,
                                   TupleTableSlot *elemTupleSlot,
                                   EState *estate, CommandId cid);
+void delete_entity(EState *estate, ResultRelInfo *resultRelInfo,
+                          HeapTuple tuple);
+agtype_value *extract_entity(CustomScanState *node,
+                                    TupleTableSlot *scanTupleSlot,
+                                    int entity_position);
 
 #endif
