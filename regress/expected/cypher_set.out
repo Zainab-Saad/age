@@ -988,6 +988,43 @@ SELECT * FROM cypher('issue_1634', $$ MATCH (u) DELETE (u) $$) AS (u agtype);
 ---
 (0 rows)
 
+SELECT create_graph('issue_1851');
+NOTICE:  graph "issue_1851" has been created
+ create_graph 
+--------------
+ 
+(1 row)
+
+SELECT * FROM cypher('issue_1851', $$ CREATE (n:A), (m:B), (n)-[e:EDGE]->(m) $$) AS (result agtype);
+ result 
+--------
+(0 rows)
+
+SELECT * FROM cypher('issue_1851', $$ MATCH (n) SET n.node=n RETURN n $$) AS (result agtype);
+                                                                  result                                                                  
+------------------------------------------------------------------------------------------------------------------------------------------
+ {"id": 844424930131969, "label": "A", "properties": {"node": {"id": 844424930131969, "label": "A", "properties": {}}::vertex}}::vertex
+ {"id": 1125899906842625, "label": "B", "properties": {"node": {"id": 1125899906842625, "label": "B", "properties": {}}::vertex}}::vertex
+(2 rows)
+
+SELECT * FROM cypher('issue_1851', $$ MATCH (n)-[e]->() SET n.edge=e SET e.startNode = n RETURN n, e $$) AS (n agtype, e agtype);
+                                                                                                                                     n                                                                                                                                      |                                                                                                                                                                                                         e                                                                                                                                                                                                         
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"id": 844424930131969, "label": "A", "properties": {"edge": {"id": 1407374883553281, "label": "EDGE", "end_id": 1125899906842625, "start_id": 844424930131969, "properties": {}}::edge, "node": {"id": 844424930131969, "label": "A", "properties": {}}::vertex}}::vertex | {"id": 1407374883553281, "label": "EDGE", "end_id": 1125899906842625, "start_id": 844424930131969, "properties": {"startNode": {"id": 844424930131969, "label": "A", "properties": {"edge": {"id": 1407374883553281, "label": "EDGE", "end_id": 1125899906842625, "start_id": 844424930131969, "properties": {}}::edge, "node": {"id": 844424930131969, "label": "A", "properties": {}}::vertex}}::vertex}}::edge
+(1 row)
+
+SELECT * FROM cypher('issue_1851', $$ MATCH (n) WITH n, {a: 1} AS m SET n.int=m.a RETURN n, m $$) AS (n agtype, m agtype);
+                                                                                                                                          n                                                                                                                                           |    m     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------
+ {"id": 844424930131969, "label": "A", "properties": {"int": 1, "edge": {"id": 1407374883553281, "label": "EDGE", "end_id": 1125899906842625, "start_id": 844424930131969, "properties": {}}::edge, "node": {"id": 844424930131969, "label": "A", "properties": {}}::vertex}}::vertex | {"a": 1}
+ {"id": 1125899906842625, "label": "B", "properties": {"int": 1, "node": {"id": 1125899906842625, "label": "B", "properties": {}}::vertex}}::vertex                                                                                                                                   | {"a": 1}
+(2 rows)
+
+SELECT * FROM cypher('issue_1851', $$ MATCH (n) DETACH DELETE n $$) AS (result agtype);
+ result 
+--------
+(0 rows)
+
 --
 -- Clean up
 --
@@ -1033,6 +1070,19 @@ DETAIL:  drop cascades to table issue_1634._ag_label_vertex
 drop cascades to table issue_1634._ag_label_edge
 drop cascades to table issue_1634."PERSION"
 NOTICE:  graph "issue_1634" has been dropped
+ drop_graph 
+------------
+ 
+(1 row)
+
+SELECT drop_graph('issue_1851', true);
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to table issue_1851._ag_label_vertex
+drop cascades to table issue_1851._ag_label_edge
+drop cascades to table issue_1851."A"
+drop cascades to table issue_1851."B"
+drop cascades to table issue_1851."EDGE"
+NOTICE:  graph "issue_1851" has been dropped
  drop_graph 
 ------------
  

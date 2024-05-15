@@ -379,6 +379,16 @@ SELECT * FROM cypher('issue_1634', $$ MERGE (v:PERSION {id: '1'})
 
 SELECT * FROM cypher('issue_1634', $$ MATCH (u) DELETE (u) $$) AS (u agtype);
 
+SELECT create_graph('issue_1851');
+
+SELECT * FROM cypher('issue_1851', $$ CREATE (n:A), (m:B), (n)-[e:EDGE]->(m) $$) AS (result agtype);
+
+SELECT * FROM cypher('issue_1851', $$ MATCH (n) SET n.node=n RETURN n $$) AS (result agtype);
+SELECT * FROM cypher('issue_1851', $$ MATCH (n)-[e]->() SET n.edge=e SET e.startNode = n RETURN n, e $$) AS (n agtype, e agtype);
+SELECT * FROM cypher('issue_1851', $$ MATCH (n) WITH n, {a: 1} AS m SET n.int=m.a RETURN n, m $$) AS (n agtype, m agtype);
+
+SELECT * FROM cypher('issue_1851', $$ MATCH (n) DETACH DELETE n $$) AS (result agtype);
+
 --
 -- Clean up
 --
@@ -387,6 +397,7 @@ DROP FUNCTION set_test;
 SELECT drop_graph('cypher_set', true);
 SELECT drop_graph('cypher_set_1', true);
 SELECT drop_graph('issue_1634', true);
+SELECT drop_graph('issue_1851', true);
 
 --
 -- End
